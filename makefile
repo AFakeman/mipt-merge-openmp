@@ -1,4 +1,5 @@
 CFLAGS = -Wall -Werror -fopenmp -g
+CC = gcc-7
 
 main: main.c
-	gcc-7 main.c -o main $(CFLAGS)
+	$(CC) main.c -o main $(CFLAGS)

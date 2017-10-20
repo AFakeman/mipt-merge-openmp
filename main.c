@@ -89,6 +89,7 @@ double MergeSort(int* array_merge,
 #pragma omp single
     RecursiveSort(array_merge, buffer, length, chunk_size);
   }
+  free(buffer);
   return omp_get_wtime() - begin;
 }
 
@@ -119,9 +120,10 @@ int main(int argc, char* argv[]) {
 
   double time_spent_merge = MergeSort(array_merge, length, chunk_size, threads);
   PrintArray(array_merge, length, data);
+  fclose(data);
   fprintf(stats, "n: %lu, m: %lu, P: %d, t: %lf\n", length, chunk_size, threads,
           time_spent_merge);
-  fclose(data);
+  fclose(stats);
 
   assert(CheckSorted(array_merge, length));
   assert(!CheckSorted(array_qsort, length));
