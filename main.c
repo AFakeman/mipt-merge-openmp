@@ -14,34 +14,23 @@ int sort_compare(const void* a, const void* b) {
   return a_val - b_val;
 }
 
-// Merge two sequential arrays, one with |left_count| elements starting at
-// zero, another at |left_count| with |right_count| elements.
-// Buffer is assumed to have enough memory to store |left_count + right_count|.
-void Merge(int* left, int* buffer, size_t left_count, size_t right_count) {
-  size_t length = left_count + right_count;
-  size_t left_cursor = 0;
-  size_t right_cursor = left_count;
-  size_t buffer_cursor = 0;
-  while (buffer_cursor < length) {
-    if (left_cursor == left_count ||
-        (right_cursor < length && left[right_cursor] < left[left_cursor])) {
-      buffer[buffer_cursor] = left[right_cursor];
-      ++right_cursor;
-    } else if (right_cursor == length ||
-               left[right_cursor] >= left[left_cursor]) {
-      buffer[buffer_cursor] = left[left_cursor];
-      ++left_cursor;
+// Returns the index of the first |array|
+// element bigger than |element| or |size| if none exist.
+// |array| is assumed to be sorted.
+size_t UpperBound(int* array, size_t size, int element) {
+  if (array[0] > element)
+    return 0;
+  size_t a = 0;
+  size_t b = size;
+  while (b - a > 1) {
+    size_t c = (a + b) / 2;
+    if (array[c] > element) {
+      b = c;
+    } else {
+      a = c;
     }
-    buffer_cursor++;
   }
-  memcpy(left, buffer, sizeof(int) * length);
-}
-
-void RandomFill(int* arr, size_t count) {
-  size_t i;
-  for (i = 0; i < count; i++) {
-    arr[i] = rand() % 16;
-  }
+  return b;
 }
 
 void PrintArray(int* arr, size_t count, FILE* file) {
@@ -50,6 +39,91 @@ void PrintArray(int* arr, size_t count, FILE* file) {
     fprintf(file, "%d ", arr[i]);
   }
   fprintf(file, "\n");
+}
+
+// Merge two arrays, one with |left_count| elements starting at
+// |left|, another at |right| with |right_count| elements.
+// Result is left in |buffer|.
+void Merge(int* left,
+           int* right,
+           int* buffer,
+           size_t left_count,
+           size_t right_count) {
+  size_t length = left_count + right_count;
+  size_t left_cursor = 0;
+  size_t right_cursor = 0;
+  size_t buffer_cursor = 0;
+  if (left_count == 0) {
+    memcpy(buffer, right, right_count * sizeof(int));
+    return;
+  } else if (right_count == 0) {
+    memcpy(buffer, left, left_count * sizeof(int));
+    return;
+  }
+  while (buffer_cursor < length) {
+    if (left_cursor == left_count ||
+        (right_cursor < right_count &&
+         right[right_cursor] < left[left_cursor])) {
+      buffer[buffer_cursor] = right[right_cursor];
+      ++right_cursor;
+    } else if (right_cursor == length ||
+               right[right_cursor] >= left[left_cursor]) {
+      buffer[buffer_cursor] = left[left_cursor];
+      ++left_cursor;
+    }
+    buffer_cursor++;
+  }
+}
+
+// Merge two sequential arrays, one with |left_count| elements starting at
+// zero, another at |left_count| with |right_count| elements.
+// Buffer is assumed to have enough memory to store |left_count + right_count|.
+void ParallelMerge(int* left,
+                   int* buffer,
+                   size_t left_count,
+                   size_t right_count) {
+  int* big;
+  int* small;
+  size_t big_count;
+  size_t small_count;
+  if (left_count < right_count) {
+    big = left + left_count;
+    big_count = right_count;
+    small = left;
+    small_count = left_count;
+  } else {
+    big = left;
+    big_count = left_count;
+    small = left + left_count;
+    small_count = right_count;
+  }
+  size_t big_half = left_count / 2;
+  int big_median = big[big_half];
+  size_t small_upper = UpperBound(small, small_count, big_median);
+  int* right_buffer = buffer + big_half + small_upper;
+  // We need to preserve the stability of the sort.
+  if (big_count == left_count) {
+    #pragma omp task
+    Merge(big, small, buffer, big_half, small_upper);
+    #pragma omp task
+    Merge(big + big_half, small + small_upper, right_buffer,
+          big_count - big_half, small_count - small_upper);
+  } else {
+    #pragma omp task
+    Merge(small, big, buffer, small_upper, big_half);
+    #pragma omp task
+    Merge(small + small_upper, big + big_half, right_buffer,
+          small_count - small_upper, big_count - big_half);
+  }
+  #pragma omp taskwait
+  memcpy(left, buffer, (right_count + left_count) * sizeof(int));
+}
+
+void RandomFill(int* arr, size_t count) {
+  size_t i;
+  for (i = 0; i < count; i++) {
+    arr[i] = rand() % 16;
+  }
 }
 
 // Sort an array |arr| with length |count| recursively. If an array is
@@ -64,7 +138,7 @@ void RecursiveSort(int* arr, int* buffer, size_t count, size_t min_count) {
 #pragma omp task
     RecursiveSort(arr + middle, buffer + middle, count - middle, min_count);
 #pragma omp taskwait
-    Merge(arr, buffer, middle, count - middle);
+    ParallelMerge(arr, buffer, middle, count - middle);
   }
 }
 
@@ -132,7 +206,7 @@ int main(int argc, char* argv[]) {
   qsort(array_qsort, length, sizeof(int), sort_compare);
   double time_spent_qsort = omp_get_wtime() - begin;
 
-  printf("Merge: %lf\nqsort: %lf", time_spent_merge, time_spent_qsort);
+  printf("Merge: %lf\nqsort: %lf\n", time_spent_merge, time_spent_qsort);
 
   assert(CheckSorted(array_merge, length));
   assert(CheckSorted(array_qsort, length));
